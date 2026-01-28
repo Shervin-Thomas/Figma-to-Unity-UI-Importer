@@ -14,6 +14,7 @@ The importer class is `FigmaUIImporter` and lives at [Assets/Editor/FigmaUIImpor
 
 - Unity 2019.4+ (script uses `UnityEditor` APIs; test on your project Unity version)
 - `SimpleJSON.cs` must be available in the project (the importer uses `SimpleJSON` types).
+- In case the console is showing any permission issues like 'Inaccessable due to Protection level' then download the SimpleJSON.cs file from this link -> https://github.com/Bunny83/SimpleJSON/blob/master/SimpleJSON.cs
 
 We include a copy at [Assets/Plugins/SimpleJSON.cs](Assets/Plugins/SimpleJSON.cs) in this repository. If you don't have it, download SimpleJSON and add it under `Assets/Plugins/` or another Editor/runtime-accessible folder.
 
