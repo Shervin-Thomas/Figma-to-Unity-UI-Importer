@@ -16,7 +16,8 @@ public class FigmaUIImporter : EditorWindow
 
     private string fileKey;
     private string token;
-    private string frameNodeId; // e.g. 12:345
+    private string frameNodeId;        // e.g. 12:345
+    private string targetCanvasName;   // OPTIONAL
 
     private const string IMAGE_FOLDER = "Assets/FigmaImages/";
 
@@ -24,6 +25,7 @@ public class FigmaUIImporter : EditorWindow
     private JSONNode frameNode;
     private List<JSONNode> renderableNodes = new List<JSONNode>();
 
+    // ===================== UI =====================
     private void OnGUI()
     {
         GUILayout.Label("Figma → Unity (Full Layer Import)", EditorStyles.boldLabel);
@@ -31,6 +33,8 @@ public class FigmaUIImporter : EditorWindow
         fileKey = EditorGUILayout.TextField("File Key", fileKey);
         token = EditorGUILayout.TextField("Access Token", token);
         frameNodeId = EditorGUILayout.TextField("Frame Node ID", frameNodeId);
+        targetCanvasName =
+            EditorGUILayout.TextField("Target Canvas (optional)", targetCanvasName);
 
         GUILayout.Space(10);
 
@@ -59,7 +63,8 @@ public class FigmaUIImporter : EditorWindow
         string json;
         try
         {
-            json = web.DownloadString($"https://api.figma.com/v1/files/{fileKey}");
+            json = web.DownloadString(
+                $"https://api.figma.com/v1/files/{fileKey}");
         }
         catch (WebException e)
         {
@@ -69,7 +74,7 @@ public class FigmaUIImporter : EditorWindow
 
         JSONNode root = JSON.Parse(json);
 
-        // 2️⃣ Find frame node by ID
+        // 2️⃣ Find frame node
         frameNode = FindNodeById(root["document"], frameNodeId);
         if (frameNode == null)
         {
@@ -77,7 +82,7 @@ public class FigmaUIImporter : EditorWindow
             return;
         }
 
-        // 3️⃣ Collect all renderable children
+        // 3️⃣ Collect renderable nodes
         renderableNodes.Clear();
         CollectRenderableNodes(frameNode);
 
@@ -88,11 +93,11 @@ public class FigmaUIImporter : EditorWindow
         }
 
         // 4️⃣ Batch export images
-        Dictionary<string, string> imageUrls =
+        Dictionary<string, string> imagePaths =
             DownloadImages(renderableNodes);
 
         // 5️⃣ Build Unity UI
-        BuildUnityUI(imageUrls);
+        BuildUnityUI(imagePaths);
 
         AssetDatabase.Refresh();
         Debug.Log("✅ Full frame assembled successfully");
@@ -101,7 +106,7 @@ public class FigmaUIImporter : EditorWindow
     // ===================== FIND NODE =====================
     JSONNode FindNodeById(JSONNode node, string id)
     {
-        if (node["id"] == id)
+        if (node["id"].Value == id)
             return node;
 
         if (!node.HasKey("children"))
@@ -120,9 +125,8 @@ public class FigmaUIImporter : EditorWindow
     // ===================== COLLECT NODES =====================
     void CollectRenderableNodes(JSONNode node)
     {
-        string type = node["type"];
+        string type = node["type"].Value;
 
-        // Skip helpers
         if (type != "GROUP" &&
             type != "BOOLEAN_OPERATION" &&
             type != "SLICE")
@@ -141,10 +145,10 @@ public class FigmaUIImporter : EditorWindow
     Dictionary<string, string> DownloadImages(List<JSONNode> nodes)
     {
         Dictionary<string, string> result = new Dictionary<string, string>();
-
         List<string> ids = new List<string>();
-        foreach (var n in nodes)
-            ids.Add(n["id"]);
+
+        foreach (JSONNode n in nodes)
+            ids.Add(n["id"].Value); // SAFE
 
         string idList = string.Join(",", ids);
         string url =
@@ -183,15 +187,7 @@ public class FigmaUIImporter : EditorWindow
     // ===================== UNITY BUILD =====================
     void BuildUnityUI(Dictionary<string, string> images)
     {
-        GameObject canvasGO = new GameObject("FigmaCanvas");
-        Canvas canvas = canvasGO.AddComponent<Canvas>();
-        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-
-        CanvasScaler scaler = canvasGO.AddComponent<CanvasScaler>();
-        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1080, 1920);
-
-        canvasGO.AddComponent<GraphicRaycaster>();
+        GameObject canvasGO = GetOrCreateCanvas();
 
         GameObject frameGO = new GameObject("FigmaFrame");
         frameGO.transform.SetParent(canvasGO.transform, false);
@@ -205,10 +201,9 @@ public class FigmaUIImporter : EditorWindow
             new Vector2(frameBox["width"].AsFloat,
                         frameBox["height"].AsFloat);
 
-        // Draw in document order
         foreach (JSONNode node in renderableNodes)
         {
-            string id = node["id"];
+            string id = node["id"].Value;
             if (!images.ContainsKey(id)) continue;
 
             var box = node["absoluteBoundingBox"];
@@ -234,5 +229,42 @@ public class FigmaUIImporter : EditorWindow
 
             rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
         }
+    }
+
+    // ===================== CANVAS RESOLUTION =====================
+    GameObject GetOrCreateCanvas()
+    {
+        if (!string.IsNullOrEmpty(targetCanvasName))
+        {
+            Canvas[] canvases = Object.FindObjectsOfType<Canvas>();
+            foreach (Canvas c in canvases)
+            {
+                if (c.name.Equals(
+                    targetCanvasName,
+                    System.StringComparison.OrdinalIgnoreCase))
+                {
+                    Debug.Log("Using existing Canvas: " + c.name);
+                    return c.gameObject;
+                }
+            }
+
+            Debug.LogWarning(
+                $"Canvas '{targetCanvasName}' not found. Creating new one.");
+        }
+
+        GameObject canvasGO = new GameObject(
+            string.IsNullOrEmpty(targetCanvasName)
+                ? "FigmaCanvas"
+                : targetCanvasName);
+
+        Canvas canvas = canvasGO.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+
+        CanvasScaler scaler = canvasGO.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1080, 1920);
+
+        canvasGO.AddComponent<GraphicRaycaster>();
+        return canvasGO;
     }
 }
