@@ -14,9 +14,10 @@ The importer class is `FigmaUIImporter` and lives at [Assets/Editor/FigmaUIImpor
 
 - Unity 2019.4+ (script uses `UnityEditor` APIs; test on your project Unity version)
 - `SimpleJSON.cs` must be available in the project (the importer uses `SimpleJSON` types).
-- In case the console is showing any permission issues like 'Inaccessable due to Protection level' then download the SimpleJSON.cs file from this link -> https://github.com/Bunny83/SimpleJSON/blob/master/SimpleJSON.cs
 
 We include a copy at [Assets/Plugins/SimpleJSON.cs](Assets/Plugins/SimpleJSON.cs) in this repository. If you don't have it, download SimpleJSON and add it under `Assets/Plugins/` or another Editor/runtime-accessible folder.
+
+- You can download the SimpleJSON.cs file from this link: https://github.com/Bunny83/SimpleJSON/blob/master/SimpleJSON.cs
 
 **Installation / Setup**
 
@@ -38,6 +39,7 @@ Copy-Item "C:\path\to\SimpleJSON.cs" -Destination "Assets\Plugins\"
 - **File Key**: the Figma file key (from the file URL: https://www.figma.com/file/<fileKey>/...)
 - **Access Token**: your Figma personal access token (see Figma docs)
 - **Frame Node ID**: the node id for the target frame (example `12:345`) — use Figma Inspect or the file JSON to find this.
+- **Target Canvas (optional)**: the name of an existing Unity `Canvas` to place the imported frame into. If this field is left empty the importer will create a new canvas named `FigmaCanvas`. If a name is provided and a canvas with that name exists, the importer will add the imported frame as a child (panel) of that existing canvas; if the named canvas does not exist, a new canvas with the provided name will be created.
 3. Click **Import Frame Layers**.
 
 The importer will:
@@ -54,12 +56,14 @@ The importer will:
 - Canvas root: a GameObject named `FigmaCanvas` with `Canvas`, `CanvasScaler` and `GraphicRaycaster`
 - Frame container: `FigmaFrame` under the canvas
 - Child images: GameObjects named by their Figma node id (e.g. `12:345`)
+Note: if you supplied a `Target Canvas` name the root canvas will be the existing canvas with that name (or a newly created canvas using that name). If you left the `Target Canvas` field empty the importer will create a new `FigmaCanvas`.
 
 **Fields explained (UI)**
 
 - **File Key**: string between `/file/` and the next `/` in the Figma URL.
 - **Access Token**: Figma personal access token (a token with `file_read` scope is sufficient for public/private files you have access to).
 - **Frame Node ID**: the Figma node id for the frame to import. You can obtain this from the Figma API JSON or via plugins/tools that reveal node ids.
+ - **Target Canvas (optional)**: type a canvas name to import into an existing `Canvas` with that name. If a matching canvas exists the importer will generate the imported frame as a child (panel) inside that canvas. If no matching canvas exists a new `Canvas` with the given name will be created. Leave empty to create a new canvas named `FigmaCanvas`.
 
 **Troubleshooting**
 
@@ -73,6 +77,7 @@ The importer will:
 - The importer sets `TextureImporter.textureType = Sprite` and disables mipmaps for downloaded images.
 - Positions are converted from Figma's coordinate system to Unity `RectTransform.anchoredPosition` (center-anchored with Y flipped).
 - The importer currently creates a new `FigmaCanvas` each run; delete or rename existing ones if you want multiple imports.
+ - Canvas handling: you can now control where the importer places the imported frame using the **Target Canvas (optional)** field. Provide a canvas name to use an existing canvas (or create one with that name if missing); leave blank to create a new `FigmaCanvas` as before.
 
 **Source & Attribution**
 
