@@ -1,89 +1,83 @@
 # Figma UI Importer
 
-**Overview**
+Overview
 
-This editor utility imports a Figma frame into Unity UI by:
-- downloading the Figma file JSON
-- locating a frame node by its ID
-- exporting renderable child nodes as PNGs
-- creating a `Canvas` and `Image` GameObjects positioned to match the frame
+- Imports a Figma frame into Unity UI, preserving parent-child hierarchy.
+- Renders non-text layers as Sprites; imports TEXT nodes as real `TextMeshProUGUI`.
+- Positions are converted from Figma (top-left origin) to Unity (center-anchored) precisely.
+- Canvas uses constant pixel size so the transform scale remains 1,1,1.
 
-The importer class is `FigmaUIImporter` and lives at [Assets/Editor/FigmaUIImporter.cs](Assets/Editor/FigmaUIImporter.cs).
+The importer class is `FigmaUIImporter` at [Assets/Editor/FigmaUIImporter.cs](Assets/Editor/FigmaUIImporter.cs).
 
-**Requirements**
+What's New
 
-- Unity 2019.4+ (script uses `UnityEditor` APIs; test on your project Unity version)
-- `SimpleJSON.cs` must be available in the project (the importer uses `SimpleJSON` types).
+- Hierarchical grouping: groups become parent GameObjects with nested children.
+- Text import: Figma `TEXT` nodes become `TextMeshProUGUI` with characters, size, alignment, and color.
+- Correct placement: children are positioned relative to their parent bounds to match Figma.
+- Canvas scaler updated to constant pixel size; Canvas scale shows 1,1,1.
 
-We include a copy at [Assets/Plugins/SimpleJSON.cs](Assets/Plugins/SimpleJSON.cs) in this repository. If you don't have it, download SimpleJSON and add it under `Assets/Plugins/` or another Editor/runtime-accessible folder.
+Requirements
 
-- You can download the SimpleJSON.cs file from this link: https://github.com/Bunny83/SimpleJSON/blob/master/SimpleJSON.cs
+- Unity 2019.4+ (EditorWindow + UI APIs).
+- `SimpleJSON.cs` in the project (used to parse Figma JSON). Get it from https://github.com/Bunny83/SimpleJSON/blob/master/SimpleJSON.cs and place it under `Assets/Plugins/`.
+- TextMesh Pro package. Install TMP essentials if prompted (`Window → TextMeshPro → Import TMP Essential Resources`).
 
-**Installation / Setup**
+Installation / Setup
 
-1. Verify `SimpleJSON.cs` is present at [Assets/Plugins/SimpleJSON.cs](Assets/Plugins/SimpleJSON.cs). If it's missing, place `SimpleJSON.cs` there.
+1. Ensure `SimpleJSON.cs` exists at [Assets/Plugins/SimpleJSON.cs](Assets/Plugins/SimpleJSON.cs).
+2. Verify the importer at [Assets/Editor/FigmaUIImporter.cs](Assets/Editor/FigmaUIImporter.cs).
+3. If TMP assets are missing, import TMP essentials.
+4. Open Unity and let scripts compile.
 
-   Example PowerShell copy (adjust source path):
+Using the Importer
 
-```powershell
-Copy-Item "C:\path\to\SimpleJSON.cs" -Destination "Assets\Plugins\"
-```
+1. Open `Tools → Figma UI Importer`.
+2. Fill in:
+   - File Key: from the Figma URL.
+   - Access Token: your Figma personal access token.
+   - Frame Node ID: e.g., `12:345`.
+   - Target Canvas (optional): name of an existing `Canvas` to import into; blank creates `FigmaCanvas`.
+3. Click Import Frame Layers.
 
-2. Ensure the importer file is present at [Assets/Editor/FigmaUIImporter.cs](Assets/Editor/FigmaUIImporter.cs).
-3. Open Unity and let it compile the scripts.
+What it does
 
-**Using the Importer**
+- Downloads `https://api.figma.com/v1/files/{fileKey}` and finds the specified frame.
+- Collects renderable nodes. TEXT nodes are not rasterized.
+- Requests PNGs only for non-text nodes via the Figma image API.
+- Saves sprites to `Assets/FigmaImages/` and creates `FigmaCanvas` → `FigmaFrame`.
+- Builds the Unity hierarchy recursively, positioning children relative to parent boxes.
 
-1. In Unity, open the menu: `Tools → Figma UI Importer`.
-2. In the window, fill the fields:
-- **File Key**: the Figma file key (from the file URL: https://www.figma.com/file/<fileKey>/...)
-- **Access Token**: your Figma personal access token (see Figma docs)
-- **Frame Node ID**: the node id for the target frame (example `12:345`) — use Figma Inspect or the file JSON to find this.
-- **Target Canvas (optional)**: the name of an existing Unity `Canvas` to place the imported frame into. If this field is left empty the importer will create a new canvas named `FigmaCanvas`. If a name is provided and a canvas with that name exists, the importer will add the imported frame as a child (panel) of that existing canvas; if the named canvas does not exist, a new canvas with the provided name will be created.
-3. Click **Import Frame Layers**.
+Output
 
-The importer will:
-- Download the full file JSON from `https://api.figma.com/v1/files/{fileKey}`
-- Find the frame node with the supplied ID
-- Collect renderable child nodes (skips GROUP/BOOLEAN_OPERATION/SLICE unless they have an absolute bounding box)
-- Request image URLs from `https://api.figma.com/v1/images/{fileKey}?ids=...&format=png&scale=2`
-- Download PNGs into `Assets/FigmaImages/`
-- Configure each image as a `Sprite` and add GameObjects under a created `FigmaCanvas` → `FigmaFrame`
+- Sprites: `Assets/FigmaImages/`.
+- Root canvas: `FigmaCanvas` with `Canvas`, `CanvasScaler` (Constant Pixel Size), `GraphicRaycaster`.
+- Frame: `FigmaFrame` under the canvas.
+- Children: GameObjects named by Figma node id. TEXT nodes have `TextMeshProUGUI` components.
 
-**Output / Where things appear**
+Text specifics
 
-- Image files: `Assets/FigmaImages/` (created if missing)
-- Canvas root: a GameObject named `FigmaCanvas` with `Canvas`, `CanvasScaler` and `GraphicRaycaster`
-- Frame container: `FigmaFrame` under the canvas
-- Child images: GameObjects named by their Figma node id (e.g. `12:345`)
-Note: if you supplied a `Target Canvas` name the root canvas will be the existing canvas with that name (or a newly created canvas using that name). If you left the `Target Canvas` field empty the importer will create a new `FigmaCanvas`.
+- Content: from `node.characters`.
+- Size: from `style.fontSize`.
+- Alignment: maps `style.textAlignHorizontal` to Left/Center/Right/Justified.
+- Color: first SOLID fill; alpha from `opacity` when present.
+- Font: uses your project’s default TMP font; assign a specific font asset if needed.
 
-**Fields explained (UI)**
+Troubleshooting
 
-- **File Key**: string between `/file/` and the next `/` in the Figma URL.
-- **Access Token**: Figma personal access token (a token with `file_read` scope is sufficient for public/private files you have access to).
-- **Frame Node ID**: the Figma node id for the frame to import. You can obtain this from the Figma API JSON or via plugins/tools that reveal node ids.
- - **Target Canvas (optional)**: type a canvas name to import into an existing `Canvas` with that name. If a matching canvas exists the importer will generate the imported frame as a child (panel) inside that canvas. If no matching canvas exists a new `Canvas` with the given name will be created. Leave empty to create a new canvas named `FigmaCanvas`.
+- Frame node not found: confirm the ID and API access.
+- Images missing: check token scope and network; see Console errors.
+- Text invisible or pink: import TMP essentials and assign a valid TMP font asset.
+- Misalignment: ensure the Game view resolution is near the Figma frame size; positions are computed relative to parent bounds.
+- `SimpleJSON` errors: place `SimpleJSON.cs` under `Assets/Plugins/`.
 
-**Troubleshooting**
+Notes
 
-- If `Frame node not found` appears: verify the `Frame Node ID` and that the file JSON contains the node (the importer searches `document` recursively).
-- If images fail to download: check `Access Token` and file permissions; inspect any WebException message in the Unity Console.
-- If sprites show up blank: ensure `Assets/FigmaImages/` was imported (Assets → Refresh happened automatically) and the PNG files are present and imported as `Sprite`.
-- If `SimpleJSON` errors occur: confirm `SimpleJSON.cs` is in an `Assets` folder and contains the `SimpleJSON` namespace; move it to `Assets/Plugins/` if necessary.
+- Texture import sets `Sprite` type and disables mipmaps.
+- The importer preserves hierarchy; you can move groups as single units in Unity.
+- Canvas scale remains 1,1,1 for predictable layout.
 
-**Notes & Tips**
+Source
 
-- The importer sets `TextureImporter.textureType = Sprite` and disables mipmaps for downloaded images.
-- Positions are converted from Figma's coordinate system to Unity `RectTransform.anchoredPosition` (center-anchored with Y flipped).
-- The importer currently creates a new `FigmaCanvas` each run; delete or rename existing ones if you want multiple imports.
- - Canvas handling: you can now control where the importer places the imported frame using the **Target Canvas (optional)** field. Provide a canvas name to use an existing canvas (or create one with that name if missing); leave blank to create a new `FigmaCanvas` as before.
+Implementation: [Assets/Editor/FigmaUIImporter.cs](Assets/Editor/FigmaUIImporter.cs).
 
-**Source & Attribution**
-
-See the importer implementation at [Assets/Editor/FigmaUIImporter.cs](Assets/Editor/FigmaUIImporter.cs).
-
-If you need enhancements (layer naming, grouping, transforms, scale adjustments, or text handling), open an issue or extend `BuildUnityUI` and `CollectRenderableNodes` in `FigmaUIImporter`.
-
----
-Generated README for the `FigmaUIImporter` editor tool.
+If you need enhancements (node naming, font mapping, vertical alignment, auto font assignment), extend `CreateUnityChildren()` and `CreateTextComponent()` in `FigmaUIImporter`.
