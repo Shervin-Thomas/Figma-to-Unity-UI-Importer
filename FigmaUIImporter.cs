@@ -5,6 +5,7 @@ using SimpleJSON;
 using System.Net;
 using System.IO;
 using System.Collections.Generic;
+using TMPro;
 
 public class FigmaUIImporter : EditorWindow
 {
@@ -148,7 +149,12 @@ public class FigmaUIImporter : EditorWindow
         List<string> ids = new List<string>();
 
         foreach (JSONNode n in nodes)
+        {
+            // Do not request raster images for TEXT nodes
+            if (n.HasKey("type") && n["type"].Value == "TEXT")
+                continue;
             ids.Add(n["id"].Value); // SAFE
+        }
 
         string idList = string.Join(",", ids);
         string url =
@@ -201,33 +207,105 @@ public class FigmaUIImporter : EditorWindow
             new Vector2(frameBox["width"].AsFloat,
                         frameBox["height"].AsFloat);
 
-        foreach (JSONNode node in renderableNodes)
+        // Recursively build the full hierarchy so grouped components
+        // become parent-child GameObjects in Unity.
+        CreateUnityChildren(frameNode, frameGO.transform, frameBox, images);
+    }
+
+    // Recursively build nodes and children preserving hierarchy.
+    void CreateUnityChildren(JSONNode node, Transform parentTransform, JSONNode parentBox, Dictionary<string, string> images)
+    {
+        if (!node.HasKey("children")) return;
+
+        foreach (JSONNode child in node["children"].AsArray)
         {
-            string id = node["id"].Value;
-            if (!images.ContainsKey(id)) continue;
+            // Some nodes may not have bounding boxes (e.g., certain effects)
+            if (!child.HasKey("absoluteBoundingBox"))
+            {
+                // Still traverse deeper in case descendants are renderable
+                CreateUnityChildren(child, parentTransform, parentBox, images);
+                continue;
+            }
 
-            var box = node["absoluteBoundingBox"];
-
-            float x = box["x"].AsFloat - frameBox["x"].AsFloat;
-            float y = box["y"].AsFloat - frameBox["y"].AsFloat;
+            var box = child["absoluteBoundingBox"];
+            string id = child["id"].Value;
 
             GameObject go = new GameObject(id);
-            go.transform.SetParent(frameGO.transform, false);
+            go.transform.SetParent(parentTransform, false);
 
-            Image img = go.AddComponent<Image>();
-            img.sprite =
-                AssetDatabase.LoadAssetAtPath<Sprite>(images[id]);
-
-            RectTransform rt = go.GetComponent<RectTransform>();
-            rt.sizeDelta =
-                new Vector2(box["width"].AsFloat,
-                            box["height"].AsFloat);
-
-            rt.anchoredPosition =
-                new Vector2(x + box["width"].AsFloat / 2f,
-                            -(y + box["height"].AsFloat / 2f));
-
+            RectTransform rt = go.AddComponent<RectTransform>();
             rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.sizeDelta = new Vector2(box["width"].AsFloat, box["height"].AsFloat);
+
+            // Convert Figma top-left coords to Unity center-anchored coords.
+            float localX = box["x"].AsFloat - parentBox["x"].AsFloat;
+            float localY = box["y"].AsFloat - parentBox["y"].AsFloat;
+            float parentW = parentBox["width"].AsFloat;
+            float parentH = parentBox["height"].AsFloat;
+            float childW = box["width"].AsFloat;
+            float childH = box["height"].AsFloat;
+            rt.anchoredPosition = new Vector2(-parentW / 2f + localX + childW / 2f,
+                                              parentH / 2f - (localY + childH / 2f));
+
+            // Create Text for Figma TEXT nodes, else add Image if available.
+            string type = child["type"].Value;
+            if (type == "TEXT")
+            {
+                CreateTextComponent(go, child);
+            }
+            else if (images.ContainsKey(id))
+            {
+                Image img = go.AddComponent<Image>();
+                img.sprite = AssetDatabase.LoadAssetAtPath<Sprite>(images[id]);
+                img.raycastTarget = false;
+            }
+
+            // Recurse into children, using this node's box as the new reference.
+            CreateUnityChildren(child, go.transform, box, images);
+        }
+    }
+
+    void CreateTextComponent(GameObject go, JSONNode node)
+    {
+        var tmp = go.AddComponent<TextMeshProUGUI>();
+        tmp.raycastTarget = false;
+        tmp.text = node.HasKey("characters") ? node["characters"].Value : string.Empty;
+
+        // Font size
+        if (node.HasKey("style") && node["style"].HasKey("fontSize"))
+        {
+            float fs = node["style"]["fontSize"].AsFloat;
+            if (fs > 0) tmp.fontSize = fs;
+        }
+
+        // Alignment (horizontal only basic mapping)
+        if (node.HasKey("style") && node["style"].HasKey("textAlignHorizontal"))
+        {
+            string align = node["style"]["textAlignHorizontal"].Value;
+            switch (align)
+            {
+                case "CENTER": tmp.alignment = TextAlignmentOptions.Center; break;
+                case "RIGHT": tmp.alignment = TextAlignmentOptions.Right; break;
+                case "JUSTIFIED": tmp.alignment = TextAlignmentOptions.Justified; break;
+                default: tmp.alignment = TextAlignmentOptions.Left; break;
+            }
+        }
+
+        // Color from first SOLID fill if available
+        if (node.HasKey("fills") && node["fills"].IsArray && node["fills"].Count > 0)
+        {
+            var fill = node["fills"][0];
+            if (fill.HasKey("type") && fill["type"].Value == "SOLID" && fill.HasKey("color"))
+            {
+                var c = fill["color"];
+                float r = c["r"].AsFloat;
+                float g = c["g"].AsFloat;
+                float b = c["b"].AsFloat;
+                float a = 1f;
+                if (fill.HasKey("opacity")) a = fill["opacity"].AsFloat;
+                tmp.color = new Color(r, g, b, a);
+            }
         }
     }
 
@@ -261,8 +339,15 @@ public class FigmaUIImporter : EditorWindow
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
 
         CanvasScaler scaler = canvasGO.AddComponent<CanvasScaler>();
-        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1080, 1920);
+        // Keep transform scale at 1,1,1 by using constant pixel size.
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ConstantPixelSize;
+        scaler.scaleFactor = 1f;
+        scaler.referencePixelsPerUnit = 100f;
+
+        // Ensure no inherited scaling from any parent
+        var rt = canvasGO.GetComponent<RectTransform>();
+        if (rt != null)
+            rt.localScale = Vector3.one;
 
         canvasGO.AddComponent<GraphicRaycaster>();
         return canvasGO;
